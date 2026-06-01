@@ -1,8 +1,11 @@
 import asyncio
+import json
 import logging
 import os
-from urllib.parse import urlparse, parse_qs
+from html.parser import HTMLParser
+from urllib.parse import quote_plus, urlparse, parse_qs
 
+import httpx
 import yt_dlp
 from youtube_transcript_api import YouTubeTranscriptApi
 
@@ -13,6 +16,197 @@ logger = logging.getLogger(__name__)
 # Export INSTAGRAM_COOKIES_FILE path in .env pointing to a Netscape-format cookies.txt.
 # Export cookies from a logged-in browser session using the yt-dlp cookies guide.
 INSTAGRAM_COOKIES_FILE = os.getenv("INSTAGRAM_COOKIES_FILE", "")
+
+
+class _YouTubeMetadataParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.meta_values: dict[str, list[str]] = {}
+        self.json_ld_blobs: list[str] = []
+        self._capture_json_ld = False
+        self._json_ld_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {key.lower(): value for key, value in attrs if value is not None}
+        tag = tag.lower()
+
+        if tag == "meta":
+            key = attr_map.get("property") or attr_map.get("name") or attr_map.get("itemprop")
+            content = attr_map.get("content")
+            if key and content:
+                self.meta_values.setdefault(key.lower(), []).append(content.strip())
+            return
+
+        if tag == "link":
+            key = attr_map.get("itemprop")
+            href = attr_map.get("href")
+            if key and href:
+                self.meta_values.setdefault(key.lower(), []).append(href.strip())
+            return
+
+        if tag == "script" and (attr_map.get("type") or "").lower() == "application/ld+json":
+            self._capture_json_ld = True
+            self._json_ld_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._capture_json_ld:
+            self._json_ld_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "script" and self._capture_json_ld:
+            blob = "".join(self._json_ld_parts).strip()
+            if blob:
+                self.json_ld_blobs.append(blob)
+            self._capture_json_ld = False
+            self._json_ld_parts = []
+
+
+def _first_non_empty(*values: str | None) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _collect_meta_values(parser: _YouTubeMetadataParser, *keys: str) -> str:
+    for key in keys:
+        values = parser.meta_values.get(key.lower()) or []
+        for value in values:
+            if value.strip():
+                return value.strip()
+    return ""
+
+
+def _parse_json_ld_author_name(blob: str) -> str:
+    try:
+        data = json.loads(blob)
+    except Exception:
+        return ""
+
+    candidates = data if isinstance(data, list) else [data]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        author = candidate.get("author")
+        if isinstance(author, dict):
+            name = author.get("name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+        publisher = candidate.get("publisher")
+        if isinstance(publisher, dict):
+            name = publisher.get("name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+    return ""
+
+
+def _parse_json_ld_thumbnail(blob: str) -> str:
+    try:
+        data = json.loads(blob)
+    except Exception:
+        return ""
+
+    candidates = data if isinstance(data, list) else [data]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        thumbnail = candidate.get("thumbnailUrl") or candidate.get("image")
+        if isinstance(thumbnail, str) and thumbnail.strip():
+            return thumbnail.strip()
+        if isinstance(thumbnail, list):
+            for item in thumbnail:
+                if isinstance(item, str) and item.strip():
+                    return item.strip()
+                if isinstance(item, dict):
+                    url = item.get("url")
+                    if isinstance(url, str) and url.strip():
+                        return url.strip()
+    return ""
+
+
+def _fetch_http_text(url: str) -> str:
+    timeout = httpx.Timeout(12.0, connect=5.0)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        return response.text
+
+
+def _fetch_youtube_oembed(url: str) -> dict:
+    oembed_url = f"https://www.youtube.com/oembed?url={quote_plus(url)}&format=json"
+    try:
+        response = httpx.get(oembed_url, timeout=httpx.Timeout(10.0, connect=5.0))
+        response.raise_for_status()
+        payload = response.json()
+        logger.info("YOUTUBE_METADATA_FALLBACK source=oembed url=%s", url)
+        return payload if isinstance(payload, dict) else {}
+    except Exception as exc:
+        logger.warning(
+            "YOUTUBE_METADATA_FALLBACK source=oembed failed url=%s error=%s: %s",
+            url,
+            type(exc).__name__,
+            exc,
+        )
+        return {}
+
+
+def _fetch_youtube_watch_metadata(url: str) -> dict:
+    try:
+        html = _fetch_http_text(url)
+    except Exception as exc:
+        logger.warning(
+            "YOUTUBE_METADATA_FALLBACK source=watch_page failed url=%s error=%s: %s",
+            url,
+            type(exc).__name__,
+            exc,
+        )
+        return {}
+
+    parser = _YouTubeMetadataParser()
+    try:
+        parser.feed(html)
+    except Exception as exc:
+        logger.warning(
+            "YOUTUBE_METADATA_FALLBACK source=watch_page_parse failed url=%s error=%s: %s",
+            url,
+            type(exc).__name__,
+            exc,
+        )
+        return {}
+
+    json_ld_author = ""
+    json_ld_thumbnail = ""
+    for blob in parser.json_ld_blobs:
+        if not json_ld_author:
+            json_ld_author = _parse_json_ld_author_name(blob)
+        if not json_ld_thumbnail:
+            json_ld_thumbnail = _parse_json_ld_thumbnail(blob)
+
+    return {
+        "title": _first_non_empty(
+            _collect_meta_values(parser, "og:title", "twitter:title"),
+            _collect_meta_values(parser, "name"),
+        ),
+        "description": _first_non_empty(
+            _collect_meta_values(parser, "og:description", "twitter:description"),
+            _collect_meta_values(parser, "description"),
+        ),
+        "creator": _first_non_empty(
+            _collect_meta_values(parser, "author", "channel_name", "channelname"),
+            json_ld_author,
+        ),
+        "thumbnail": _first_non_empty(
+            _collect_meta_values(parser, "og:image", "twitter:image"),
+            json_ld_thumbnail,
+        ),
+    }
 
 
 def _extract_thumbnail_urls(info: dict | None, video_id: str) -> tuple[str, list[str]]:
@@ -115,11 +309,11 @@ def _build_ydl_opts(platform: str) -> dict:
 def _safe_transcript(yt_id: str) -> str:
     try:
         segments = YouTubeTranscriptApi.get_transcript(yt_id)
-        return " ".join(s["text"] for s in segments)
+        transcript = " ".join(s["text"] for s in segments)
+        logger.info("YOUTUBE_TRANSCRIPT_SUCCESS yt_id=%s segments=%d", yt_id, len(segments))
+        return transcript
     except Exception as e:
-        logger.warning(
-            "Transcript unavailable for %s: %s: %s", yt_id, type(e).__name__, e
-        )
+        logger.warning("YOUTUBE_TRANSCRIPT_FAILED yt_id=%s error=%s: %s", yt_id, type(e).__name__, e)
         return ""
 
 
@@ -187,8 +381,35 @@ def _fetch_youtube_sync(url: str, video_id: str) -> dict:
 
     info = _safe_extract_info(url, platform)
     if info is None:
+        oembed_data = _fetch_youtube_oembed(url)
+        watch_data = _fetch_youtube_watch_metadata(url)
         data = _default_data(url, video_id, platform)
         data["transcript"] = transcript_text
+        data["title"] = _first_non_empty(oembed_data.get("title"), watch_data.get("title"))
+        data["creator"] = _first_non_empty(oembed_data.get("author_name"), watch_data.get("creator"))
+        data["description"] = _first_non_empty(watch_data.get("description"))
+        data["thumbnail"] = _first_non_empty(oembed_data.get("thumbnail_url"), watch_data.get("thumbnail"))
+        data["thumbnail_alternates"] = [
+            value
+            for value in [oembed_data.get("thumbnail_url"), watch_data.get("thumbnail")]
+            if isinstance(value, str) and value.strip() and value.strip() != data["thumbnail"]
+        ]
+        if data["description"]:
+            data["hashtags"] = extract_hashtags(f"{data['title']} {data['description']}")
+
+        logger.info(
+            "YOUTUBE_METADATA_FALLBACK video_id=%s url=%s title=%s creator=%s thumbnail=%s",
+            video_id,
+            url,
+            data["title"] or "",
+            data["creator"] or "",
+            data["thumbnail"] or "",
+        )
+        logger.info(
+            "YOUTUBE_INGEST_COMPLETE video_id=%s url=%s metadata_source=fallback",
+            video_id,
+            url,
+        )
         return data
 
     views = info.get("view_count") or 0
@@ -203,6 +424,20 @@ def _fetch_youtube_sync(url: str, video_id: str) -> dict:
         engagement_rate = compute_engagement_rate(likes, comments, views)
 
     thumbnail, thumbnail_alternates = _extract_thumbnail_urls(info, video_id)
+
+    logger.info(
+        "YOUTUBE_METADATA_SUCCESS video_id=%s url=%s title=%s creator=%s thumbnail=%s",
+        video_id,
+        url,
+        info.get("title") or "",
+        info.get("uploader") or info.get("channel") or "",
+        thumbnail or "",
+    )
+    logger.info(
+        "YOUTUBE_INGEST_COMPLETE video_id=%s url=%s metadata_source=yt_dlp",
+        video_id,
+        url,
+    )
 
     return {
         "video_id": video_id,
