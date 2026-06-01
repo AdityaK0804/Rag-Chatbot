@@ -60,6 +60,7 @@ def get_video_metadata(url_or_id: str) -> dict:
                 "comments": to_int(meta.get("comments")) or 0,
                 "duration": to_int(meta.get("duration")) or 0,
                 "engagement_rate": to_float(meta.get("engagement_rate")),
+                "hashtags": meta.get("hashtags", "").split(",") if meta.get("hashtags") else [],
             }
     except Exception as e:
         logger.warning("Could not fetch metadata for video %s: %s", url_or_id, e)
@@ -80,6 +81,35 @@ def detect_video_filter(question: str) -> str | None:
         return "B"
     return None
 
+def get_all_chunks_for_video_id(video_id: str) -> list[dict]:
+    """
+    Directly pull all transcript/content chunks for a given video ID from ChromaDB,
+    ordered by chunk_index.
+    """
+    try:
+        client = chromadb.PersistentClient(path=CHROMA_DIR)
+        collection = client.get_collection(COLLECTION_NAME)
+        res = collection.get(where={"video_id": video_id}, include=["metadatas", "documents"])
+        
+        chunks = []
+        for doc_id, meta, doc in zip(res.get("ids", []), res.get("metadatas", []), res.get("documents", [])):
+            # Skip empty or default placeholder chunks
+            if doc.startswith("[No transcript available"):
+                continue
+            chunks.append({
+                "text": doc,
+                "metadata": meta,
+                "score": 1.0,
+                "source": f"Video {meta.get('video_id')} — chunk {meta.get('chunk_index')}",
+            })
+        
+        chunks.sort(key=lambda x: x["metadata"].get("chunk_index", 0))
+        return chunks
+    except Exception as e:
+        logger.warning("Failed to get all chunks for video_id %s: %s", video_id, e)
+        return []
+
+
 def retrieve(
     question: str,
     url_a: str,
@@ -93,16 +123,48 @@ def retrieve(
     video_filter = detect_video_filter(question)
     
     if video_filter == "A":
-        url_filter = url_a
+        video_id_filter = "A"
     elif video_filter == "B":
-        url_filter = url_b
+        video_id_filter = "B"
     else:
-        url_filter = [url_a, url_b]
+        video_id_filter = ["A", "B"]
 
-    chunks = query_chunks(question, url_filter=url_filter, n_results=n_results)
+    # 1. Get semantically relevant chunks from similarity search
+    similarity_chunks = query_chunks(question, video_id_filter=video_id_filter, n_results=n_results)
+
+    # 2. Get direct chunks for the active URLs to ensure content is always present
+    direct_chunks = []
+    if video_filter == "A" or video_filter is None:
+        direct_chunks.extend(get_all_chunks_for_video_id("A"))
+    if video_filter == "B" or video_filter is None:
+        direct_chunks.extend(get_all_chunks_for_video_id("B"))
+
+    # 3. Merge and deduplicate chunks by their text content
+    seen_texts = set()
+    merged_chunks = []
+    
+    for c in similarity_chunks:
+        text_sig = c["text"].strip()
+        if text_sig not in seen_texts:
+            seen_texts.add(text_sig)
+            merged_chunks.append(c)
+            
+    for c in direct_chunks:
+        text_sig = c["text"].strip()
+        if text_sig not in seen_texts:
+            seen_texts.add(text_sig)
+            merged_chunks.append(c)
+
+    # Sort merged chunks: Video A chunks first (ordered by chunk_index), then Video B chunks (ordered by chunk_index)
+    def sort_key(chunk):
+        video_id = chunk["metadata"].get("video_id", "A")
+        chunk_idx = chunk["metadata"].get("chunk_index", 0)
+        return (video_id, chunk_idx)
+
+    merged_chunks.sort(key=sort_key)
 
     logger.info(
-        "Retrieved %d chunks | filter=%s | question=%s",
-        len(chunks), video_filter, question[:60],
+        "Retrieved %d total chunks (similarity=%d, direct=%d) | filter=%s | question=%s",
+        len(merged_chunks), len(similarity_chunks), len(direct_chunks), video_filter, question[:60],
     )
-    return chunks
+    return merged_chunks

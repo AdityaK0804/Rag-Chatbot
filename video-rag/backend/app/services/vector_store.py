@@ -84,6 +84,7 @@ async def store_chunks(data: dict, chunks: list[str]) -> int:
             "title": data.get("title") or "",
             "comments": str(data.get("comments") or 0),
             "duration": str(data.get("duration") or 0),
+            "hashtags": ",".join(data.get("hashtags") or []),
         }
         for i in range(len(chunks))
     ]
@@ -102,21 +103,21 @@ async def store_chunks(data: dict, chunks: list[str]) -> int:
 
 def query_chunks(
     question: str,
-    url_filter: str | list[str] | None = None,
+    video_id_filter: str | list[str] | None = None,
     n_results: int = 5,
 ) -> list[dict]:
     """
     Retrieve top-n chunks relevant to the question.
-    url_filter: a single URL (string) or list of URLs to filter by.
+    video_id_filter: a single video ID ("A" or "B") or list of video IDs to filter by.
     """
     store = get_langchain_store()
 
     search_kwargs: dict = {"k": n_results}
-    if url_filter:
-        if isinstance(url_filter, list):
-            search_kwargs["filter"] = {"url": {"$in": url_filter}}
+    if video_id_filter:
+        if isinstance(video_id_filter, list):
+            search_kwargs["filter"] = {"video_id": {"$in": video_id_filter}}
         else:
-            search_kwargs["filter"] = {"url": url_filter}
+            search_kwargs["filter"] = {"video_id": video_id_filter}
 
     results = store.similarity_search_with_relevance_scores(
         question, **search_kwargs
@@ -147,3 +148,15 @@ def get_retriever(video_filter: str | None = None):
         search_type="similarity",
         search_kwargs=search_kwargs,
     )
+
+
+def delete_video_chunks(video_id: str):
+    """
+    Delete all chunks matching the given video_id ('A' or 'B') from ChromaDB.
+    """
+    try:
+        collection = _get_raw_collection()
+        collection.delete(where={"video_id": video_id})
+        logger.info("Deleted all existing chunks for video %s from ChromaDB", video_id)
+    except Exception as e:
+        logger.warning("Failed to delete chunks for video %s: %s", video_id, e)

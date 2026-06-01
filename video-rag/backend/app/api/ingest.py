@@ -6,8 +6,9 @@ from fastapi import APIRouter, HTTPException
 from app.models.request import IngestRequest
 from app.models.response import IngestResponse, VideoMeta
 from app.services.transcript import fetch_video_data
-from app.services.vector_store import store_chunks, get_chunk_count
-from app.utils.cache import is_cached, mark_cached
+from app.services.vector_store import store_chunks, get_chunk_count, delete_video_chunks
+from app.utils.cache import is_cached, mark_cached, clear_cache
+from app.services.rag_chain import clear_session_state
 from app.utils.chunker import get_chunks
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,12 @@ async def ingest_videos(request: IngestRequest):
 
     videos = {}
 
+    # Clear previous state and database entries for A and B
+    clear_session_state()
+    clear_cache()
+    delete_video_chunks("A")
+    delete_video_chunks("B")
+
     for data in results:
         if isinstance(data, Exception):
             logger.error("fetch_video_data failed: %s", data)
@@ -40,24 +47,43 @@ async def ingest_videos(request: IngestRequest):
             already_indexed = True
         else:
             already_indexed = False
-            # Temporary debug logging
             transcript = data.get("transcript") or ""
-            logger.info("DEBUG: Video %s - transcript length: %d", vid, len(transcript))
-            logger.info("DEBUG: Video %s - transcript preview (first 300 chars): %s", vid, transcript[:300])
+            description = data.get("description") or ""
+            hashtags = data.get("hashtags") or []
             
-            chunks = get_chunks(transcript)
-            logger.info("DEBUG: Video %s - number of chunks created: %d", vid, len(chunks))
-            if chunks:
-                logger.info("DEBUG: Video %s - first chunk preview: %s", vid, chunks[0][:300])
-            else:
-                logger.info("DEBUG: Video %s - no chunks created", vid)
+            logger.info("DEBUG: Video %s - transcript length: %d, description length: %d, hashtags: %d",
+                        vid, len(transcript), len(description), len(hashtags))
+            
+            chunks = []
+            
+            # 1. Transcript chunks
+            if transcript.strip():
+                t_chunks = get_chunks(transcript)
+                chunks.extend(t_chunks)
+                logger.info("DEBUG: Video %s - created %d transcript chunks", vid, len(t_chunks))
+            
+            # 2. Description chunks (if not duplicate of transcript)
+            transcript_clean = " ".join(transcript.strip().split())
+            description_clean = " ".join(description.strip().split())
+            if description_clean and description_clean != transcript_clean:
+                d_chunks = get_chunks(description)
+                for dc in d_chunks:
+                    chunks.append(f"Description: {dc}")
+                logger.info("DEBUG: Video %s - created %d description chunks", vid, len(d_chunks))
+            
+            # 3. Hashtags chunk
+            if hashtags:
+                chunks.append("Hashtags: " + ", ".join(hashtags))
+                logger.info("DEBUG: Video %s - added hashtags chunk", vid)
                 
-            logger.info("DEBUG: Video %s - number of chunks sent to vector store: %d", vid, len(chunks))
+            logger.info("DEBUG: Video %s - total chunks compiled: %d", vid, len(chunks))
             
-            # Ensure at least one placeholder chunk is stored so metadata is cached in ChromaDB
+            # Ensure at least one fallback/placeholder chunk is stored so metadata is cached in ChromaDB
             if not chunks:
-                logger.info("DEBUG: Video %s - storing placeholder chunk for metadata caching", vid)
-                chunks = [f"[No transcript available for Video {vid}]"]
+                logger.info("DEBUG: Video %s - storing fallback metadata chunk", vid)
+                title = data.get("title") or f"Video {vid}"
+                creator = data.get("creator") or "Unknown"
+                chunks = [f"Video Title: {title} | Creator: {creator} | [No transcript or description available]"]
 
             chunks_stored = await store_chunks(data, chunks)
             logger.info("DEBUG: Video %s - number of chunks actually stored: %d", vid, chunks_stored)
@@ -82,5 +108,13 @@ async def ingest_videos(request: IngestRequest):
             chunks_stored=chunks_stored,
             already_indexed=already_indexed,
         )
+
+    # Log/print the active video titles
+    title_a = videos["A"].title if "A" in videos else "None"
+    title_b = videos["B"].title if "B" in videos else "None"
+    logger.info("ACTIVE VIDEO A:\n%s", title_a)
+    logger.info("ACTIVE VIDEO B:\n%s", title_b)
+    print(f"ACTIVE VIDEO A:\n{title_a}")
+    print(f"ACTIVE VIDEO B:\n{title_b}")
 
     return IngestResponse(status="ok", videos=videos)

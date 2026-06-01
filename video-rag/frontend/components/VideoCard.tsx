@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import type { VideoMeta } from '@/types'
+
 
 interface VideoCardProps {
     video: VideoMeta
@@ -25,6 +27,10 @@ function fmtDate(raw: string): string {
 export function VideoCard({ video, label }: VideoCardProps) {
     const isA = label === 'A'
     const isInstagram = video.platform === 'instagram'
+    const [imageError, setImageError] = useState(false)
+
+    const imageSrc = !imageError && video.thumbnail ? video.thumbnail : '/video-placeholder.jpg'
+    const showUnavailableBadge = !video.thumbnail || imageError
 
     const platformBadge = isInstagram ? (
         <span className="bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600 text-white font-code text-[10px] px-2.5 py-1 rounded font-bold uppercase tracking-wide">
@@ -39,46 +45,41 @@ export function VideoCard({ video, label }: VideoCardProps) {
     return (
         <div className={`glass-panel rounded-2xl overflow-hidden flex flex-col group border-surface-variant/30 ${isA ? 'border-primary/15' : ''}`}>
             {/* Thumbnail - cinematic aspect-video */}
-            {video.thumbnail ? (
-                <div className="relative aspect-video bg-surface-container-low overflow-hidden">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                        src={video.thumbnail}
-                        alt={video.title}
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
-                    <div className="absolute top-3 left-3 flex flex-col gap-1">
-                        {platformBadge}
-                    </div>
-                    <div className="absolute top-3 right-3 flex items-center gap-1.5">
-                        <span className="bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
-                            Video {label}
+            <div className="relative aspect-video bg-surface-container-low overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                    src={imageSrc}
+                    alt={video.title}
+                    onError={() => setImageError(true)}
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
+                <div className="absolute top-3 left-3 flex flex-col gap-1.5 items-start">
+                    {platformBadge}
+                    {showUnavailableBadge && (
+                        <span className="bg-black/75 backdrop-blur-sm text-amber-200 font-code text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border border-amber-500/30">
+                            Thumbnail unavailable
                         </span>
-                        {video.already_indexed && (
-                            <span className="bg-primary/20 backdrop-blur-sm text-primary text-[10px] px-1.5 py-0.5 rounded border border-primary/20">
-                                cached
-                            </span>
-                        )}
-                    </div>
-                    {video.duration > 0 && (
-                        <div className="absolute bottom-3 right-3">
-                            <span className="font-code text-white bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-[11px]">
-                                {fmtDuration(video.duration)}
-                            </span>
-                        </div>
                     )}
                 </div>
-            ) : (
-                <div className="relative aspect-video bg-surface-container flex items-center justify-center border-b border-surface-variant/30">
-                    <span className="text-xs font-bold text-on-surface-variant bg-black/40 px-3 py-1.5 rounded">
-                        Video {label} (No Thumbnail)
+                <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                    <span className="bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        Video {label}
                     </span>
-                    <div className="absolute top-3 right-3">
-                        {platformBadge}
-                    </div>
+                    {video.already_indexed && (
+                        <span className="bg-primary/20 backdrop-blur-sm text-primary text-[10px] px-1.5 py-0.5 rounded border border-primary/20">
+                            cached
+                        </span>
+                    )}
                 </div>
-            )}
+                {video.duration > 0 && (
+                    <div className="absolute bottom-3 right-3">
+                        <span className="font-code text-white bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-[11px]">
+                            {fmtDuration(video.duration)}
+                        </span>
+                    </div>
+                )}
+            </div>
 
             {/* Content area with increased vertical padding (p-6) */}
             <div className="p-6 flex-1 flex flex-col justify-between space-y-4">

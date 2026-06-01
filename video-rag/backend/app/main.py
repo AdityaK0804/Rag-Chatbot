@@ -19,8 +19,8 @@ async def lifespan(app: FastAPI):
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY or GOOGLE_API_KEY is not set. Add it to your .env file.")
-    print("✓ Gemini API key found")
-    print("✓ Server ready")
+    print("[OK] Gemini API key found")
+    print("[OK] Server ready")
     yield
     # Anything after yield runs on shutdown. Nothing to clean up yet.
 

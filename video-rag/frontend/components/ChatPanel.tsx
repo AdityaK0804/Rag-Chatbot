@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { VideoState } from '@/types'
 import { useStreamingChat } from '@/hooks/useStreamingChat'
 import { SourceBadge } from './SourceBadge'
@@ -110,16 +112,32 @@ export function ChatPanel({ sessionId, videos }: ChatPanelProps) {
                                 <span className="text-[8px] font-code text-on-surface-variant uppercase tracking-wider mr-1">You</span>
                             </div>
                         ) : (
-                            <div className="flex flex-col items-start gap-1 max-w-[85%]">
-                                <div className="p-5 rounded-2xl rounded-tl-none ai-sparkle-gradient border border-primary/20 text-on-surface text-sm leading-relaxed space-y-3 shadow-md">
-                                    <div className="whitespace-pre-wrap font-body">
-                                        {message.content}
-                                        {message.isStreaming && (
-                                            <span className="inline-block w-1.5 h-3.5 bg-primary/70 ml-0.5 align-middle animate-pulse" />
-                                        )}
+                            <div className="flex flex-col items-start gap-1 max-w-[82%] lg:max-w-[72%] w-full">
+                                <div className="p-6 md:p-8 rounded-2xl rounded-tl-none ai-sparkle-gradient border border-primary/15 text-on-surface text-[15px] leading-relaxed space-y-4 shadow-lg w-full">
+                                    <div className={`font-body markdown-content space-y-6 ${message.isStreaming ? 'is-streaming' : ''}`}>
+                                        {message.content.split(/(?=^##\s)/m).map((section, idx) => {
+                                            const isSection = section.startsWith('##');
+                                            return (
+                                                <div
+                                                    key={idx}
+                                                    className={isSection ? "p-5 md:p-6 rounded-xl bg-surface-container/30 border border-surface-variant/20 hover:border-primary/10 transition-colors shadow-sm" : ""}
+                                                >
+                                                    <ReactMarkdown 
+                                                        remarkPlugins={[remarkGfm]}
+                                                        components={{
+                                                            a: ({ node, ...props }) => (
+                                                                <a target="_blank" rel="noopener noreferrer" {...props} />
+                                                            )
+                                                        }}
+                                                    >
+                                                        {section}
+                                                    </ReactMarkdown>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                     {message.citations && message.citations.length > 0 && (
-                                        <div className="pt-2.5 border-t border-surface-variant/20 flex flex-wrap gap-1.5">
+                                        <div className="pt-4 border-t border-surface-variant/20 flex flex-wrap gap-1.5 w-full">
                                             <SourceBadge citations={message.citations} />
                                         </div>
                                     )}

@@ -4,5 +4,6 @@
     "python.analysis.extraPaths": [
         "${workspaceFolder}/video-rag/backend/venv/Lib/site-packages"
     ],
-    "css.lint.unknownAtRules": "ignore"
+    "css.lint.unknownAtRules": "ignore",
+    "python.terminal.useEnvFile": true
 }

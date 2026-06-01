@@ -24,3 +24,7 @@ def mark_cached(url: str):
     cache = _read()
     cache.add(hashlib.md5(url.encode()).hexdigest())
     _write(cache)
+
+
+def clear_cache():
+    _write(set())
