@@ -28,8 +28,11 @@ class IngestResponse(BaseModel):
 
 class CitationSource(BaseModel):
     video_id: str          # "A" or "B"
+    source_video: str | None = None
     chunk_index: int
     preview: str           # first 120 chars of the chunk
+    source_type: str | None = None
+    confidence_level: str | None = None
 
 
 class ChatResponse(BaseModel):

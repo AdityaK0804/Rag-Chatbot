@@ -311,6 +311,47 @@ def _build_retrieval_debug_payload(chunks: list[dict], question: str) -> dict:
     }
 
 
+def _confidence_level(score: float | int | None, source_type: str) -> str:
+    if source_type == "metadata_fallback":
+        return "low"
+    try:
+        numeric_score = float(score) if score is not None else None
+    except (TypeError, ValueError):
+        numeric_score = None
+
+    if numeric_score is None:
+        return "medium"
+    if numeric_score >= 0.85:
+        return "high"
+    if numeric_score >= 0.65:
+        return "medium"
+    return "low"
+
+
+def _build_citation_entry(chunk: dict) -> dict:
+    metadata = chunk.get("metadata") or {}
+    source_type = _normalize_chunk_source_type(chunk)
+    return {
+        "video_id": metadata.get("video_id", ""),
+        "source_video": metadata.get("video_id", ""),
+        "chunk_index": metadata.get("chunk_index", 0),
+        "preview": chunk.get("text", "")[:120] + ("..." if len(chunk.get("text", "")) > 120 else ""),
+        "source_type": source_type,
+        "confidence_level": _confidence_level(chunk.get("score"), source_type),
+    }
+
+
+def _build_static_metadata_citation(video_id: str, meta: dict, label: str) -> dict:
+    return {
+        "video_id": video_id,
+        "source_video": video_id,
+        "chunk_index": 0,
+        "preview": f"Static Metadata for Video {label}: Title='{meta.get('title')}', Creator='{meta.get('creator')}'",
+        "source_type": "metadata_fallback",
+        "confidence_level": "low",
+    }
+
+
 def format_platform(platform: str) -> str:
     if not platform:
         return "Unknown"
@@ -463,16 +504,8 @@ async def stream_response(
                         yield ev
             
             citations = [
-                {
-                    "video_id": "A",
-                    "chunk_index": 0,
-                    "preview": f"Static Metadata for Video A: Title='{meta_a.get('title')}', Creator='{meta_a.get('creator')}'",
-                },
-                {
-                    "video_id": "B",
-                    "chunk_index": 0,
-                    "preview": f"Static Metadata for Video B: Title='{meta_b.get('title')}', Creator='{meta_b.get('creator')}'",
-                }
+                _build_static_metadata_citation("A", meta_a, "A"),
+                _build_static_metadata_citation("B", meta_b, "B"),
             ]
             async for ev in yield_event("citations", {"citations": citations}):
                 yield ev
@@ -502,16 +535,8 @@ async def stream_response(
                         yield ev
             
             citations = [
-                {
-                    "video_id": "A",
-                    "chunk_index": 0,
-                    "preview": f"Static Metadata for Video A: Title='{meta_a.get('title')}', Creator='{meta_a.get('creator')}', Views='{views_a}'",
-                },
-                {
-                    "video_id": "B",
-                    "chunk_index": 0,
-                    "preview": f"Static Metadata for Video B: Title='{meta_b.get('title')}', Creator='{meta_b.get('creator')}', Views='{views_b}'",
-                }
+                _build_static_metadata_citation("A", meta_a, "A"),
+                _build_static_metadata_citation("B", meta_b, "B"),
             ]
             async for ev in yield_event("citations", {"citations": citations}):
                 yield ev
@@ -541,16 +566,8 @@ async def stream_response(
                         yield ev
             
             citations = [
-                {
-                    "video_id": "A",
-                    "chunk_index": 0,
-                    "preview": f"Static Metadata for Video A: Title='{meta_a.get('title')}', Creator='{meta_a.get('creator')}', EngagementRate='{rate_a}'",
-                },
-                {
-                    "video_id": "B",
-                    "chunk_index": 0,
-                    "preview": f"Static Metadata for Video B: Title='{meta_b.get('title')}', Creator='{meta_b.get('creator')}', EngagementRate='{rate_b}'",
-                }
+                _build_static_metadata_citation("A", meta_a, "A"),
+                _build_static_metadata_citation("B", meta_b, "B"),
             ]
             async for ev in yield_event("citations", {"citations": citations}):
                 yield ev
@@ -683,11 +700,7 @@ async def stream_response(
 
             # Build and yield citations only when we have content
             citations = [
-                {
-                    "video_id": c["metadata"].get("video_id", ""),
-                    "chunk_index": c["metadata"].get("chunk_index", 0),
-                    "preview": c["text"][:120] + ("..." if len(c["text"]) > 120 else ""),
-                }
+                _build_citation_entry(c)
                 for c in chunks
             ]
 
@@ -706,30 +719,14 @@ async def stream_response(
 
             if ref_a and ref_b:
                 if not has_a_cit:
-                    citations.append({
-                        "video_id": "A",
-                        "chunk_index": 0,
-                        "preview": f"Static Metadata for Video A: Title='{meta_a.get('title')}', Creator='{meta_a.get('creator')}'",
-                    })
+                    citations.append(_build_static_metadata_citation("A", meta_a, "A"))
                 if not has_b_cit:
-                    citations.append({
-                        "video_id": "B",
-                        "chunk_index": 0,
-                        "preview": f"Static Metadata for Video B: Title='{meta_b.get('title')}', Creator='{meta_b.get('creator')}'",
-                    })
+                    citations.append(_build_static_metadata_citation("B", meta_b, "B"))
             else:
                 if ref_a and not has_a_cit:
-                    citations.append({
-                        "video_id": "A",
-                        "chunk_index": 0,
-                        "preview": f"Static Metadata for Video A: Title='{meta_a.get('title')}', Creator='{meta_a.get('creator')}'",
-                    })
+                    citations.append(_build_static_metadata_citation("A", meta_a, "A"))
                 if ref_b and not has_b_cit:
-                    citations.append({
-                        "video_id": "B",
-                        "chunk_index": 0,
-                        "preview": f"Static Metadata for Video B: Title='{meta_b.get('title')}', Creator='{meta_b.get('creator')}'",
-                    })
+                    citations.append(_build_static_metadata_citation("B", meta_b, "B"))
 
             async for ev in yield_event("citations", {"citations": citations}):
                 yield ev

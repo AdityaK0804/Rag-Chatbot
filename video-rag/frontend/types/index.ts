@@ -20,8 +20,11 @@ export interface VideoMeta {
 
 export interface Citation {
     video_id: string
+    source_video?: string
     chunk_index: number
     preview: string
+    source_type?: string
+    confidence_level?: string
 }
 
 export interface Message {
