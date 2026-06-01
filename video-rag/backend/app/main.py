@@ -35,13 +35,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow the Next.js dev server to call the API.
-# In production you'd replace the wildcard with your actual domain.
+# Allow the Next.js dev server and deployed frontend to call the API.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://rag-chatbot-kryptex08s-projects.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
