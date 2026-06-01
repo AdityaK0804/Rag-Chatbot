@@ -69,7 +69,17 @@ export function SourceBadge({ citations }: SourceBadgeProps) {
                                             .filter(c => c.video_id === 'A')
                                             .map((c, idx) => (
                                                 <li key={idx} className="text-gray-300">
-                                                    {c.preview}
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div className="flex-1 pr-2">{c.preview}</div>
+                                                        <div className="flex-shrink-0 flex items-center gap-2">
+                                                            {c.source_type && (
+                                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-800/60 text-blue-200">{c.source_type}</span>
+                                                            )}
+                                                            {c.confidence_level && (
+                                                                <span className={`text-[10px] px-2 py-0.5 rounded-full ${c.confidence_level === 'high' ? 'bg-emerald-700 text-emerald-100' : c.confidence_level === 'medium' ? 'bg-yellow-700 text-yellow-100' : 'bg-rose-700 text-rose-100'}`}>{c.confidence_level}</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
                                                 </li>
                                             ))}
                                     </ul>
@@ -83,7 +93,17 @@ export function SourceBadge({ citations }: SourceBadgeProps) {
                                             .filter(c => c.video_id === 'B')
                                             .map((c, idx) => (
                                                 <li key={idx} className="text-gray-300">
-                                                    {c.preview}
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div className="flex-1 pr-2">{c.preview}</div>
+                                                        <div className="flex-shrink-0 flex items-center gap-2">
+                                                            {c.source_type && (
+                                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-800/60 text-emerald-200">{c.source_type}</span>
+                                                            )}
+                                                            {c.confidence_level && (
+                                                                <span className={`text-[10px] px-2 py-0.5 rounded-full ${c.confidence_level === 'high' ? 'bg-emerald-700 text-emerald-100' : c.confidence_level === 'medium' ? 'bg-yellow-700 text-yellow-100' : 'bg-rose-700 text-rose-100'}`}>{c.confidence_level}</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
                                                 </li>
                                             ))}
                                     </ul>
