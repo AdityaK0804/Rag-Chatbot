@@ -10,7 +10,7 @@ from app.services.transcript import fetch_video_data
 from app.services.vector_store import store_chunks, get_chunk_count, delete_video_chunks
 from app.utils.cache import is_cached, mark_cached, clear_cache
 from app.services.rag_chain import clear_session_state
-from app.utils.chunker import get_chunks
+from app.utils.chunker import get_chunks, get_metadata_fallback_chunk
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -60,31 +60,30 @@ async def ingest_videos(request: IngestRequest):
             # 1. Transcript chunks
             if transcript.strip():
                 t_chunks = get_chunks(transcript)
-                chunks.extend(t_chunks)
+                chunks.extend({"text": chunk, "source_type": "transcript"} for chunk in t_chunks)
                 logger.info("DEBUG: Video %s - created %d transcript chunks", vid, len(t_chunks))
-            
-            # 2. Description chunks (if not duplicate of transcript)
-            transcript_clean = " ".join(transcript.strip().split())
-            description_clean = " ".join(description.strip().split())
-            if description_clean and description_clean != transcript_clean:
-                d_chunks = get_chunks(description)
-                for dc in d_chunks:
-                    chunks.append(f"Description: {dc}")
-                logger.info("DEBUG: Video %s - created %d description chunks", vid, len(d_chunks))
-            
-            # 3. Hashtags chunk
-            if hashtags:
-                chunks.append("Hashtags: " + ", ".join(hashtags))
-                logger.info("DEBUG: Video %s - added hashtags chunk", vid)
+                
+                # 2. Description chunks (if not duplicate of transcript)
+                transcript_clean = " ".join(transcript.strip().split())
+                description_clean = " ".join(description.strip().split())
+                if description_clean and description_clean != transcript_clean:
+                    d_chunks = get_chunks(description)
+                    for dc in d_chunks:
+                        chunks.append({"text": f"Description: {dc}", "source_type": "transcript"})
+                    logger.info("DEBUG: Video %s - created %d description chunks", vid, len(d_chunks))
+                
+                # 3. Hashtags chunk
+                if hashtags:
+                    chunks.append({"text": "Hashtags: " + ", ".join(hashtags), "source_type": "transcript"})
+                    logger.info("DEBUG: Video %s - added hashtags chunk", vid)
+            else:
+                chunks.append({
+                    "text": get_metadata_fallback_chunk(data),
+                    "source_type": "metadata_fallback",
+                })
+                logger.info("DEBUG: Video %s - created metadata fallback chunk", vid)
                 
             logger.info("DEBUG: Video %s - total chunks compiled: %d", vid, len(chunks))
-            
-            # Ensure at least one fallback/placeholder chunk is stored so metadata is cached in ChromaDB
-            if not chunks:
-                logger.info("DEBUG: Video %s - storing fallback metadata chunk", vid)
-                title = data.get("title") or f"Video {vid}"
-                creator = data.get("creator") or "Unknown"
-                chunks = [f"Video Title: {title} | Creator: {creator} | [No transcript or description available]"]
 
             try:
                 chunks_stored = await store_chunks(data, chunks)

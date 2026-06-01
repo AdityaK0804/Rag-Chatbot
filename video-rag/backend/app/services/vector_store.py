@@ -59,7 +59,7 @@ def get_chunk_count(url: str) -> int:
         return 0
 
 
-async def store_chunks(data: dict, chunks: list[str]) -> int:
+async def store_chunks(data: dict, chunks: list[str | dict]) -> int:
     """
     Embed chunks and upsert into ChromaDB.
     Returns number of chunks stored.
@@ -68,8 +68,17 @@ async def store_chunks(data: dict, chunks: list[str]) -> int:
         logger.warning("No chunks to store for video %s", data.get("video_id"))
         return 0
 
+    chunk_texts = [
+        chunk["text"] if isinstance(chunk, dict) else chunk
+        for chunk in chunks
+    ]
+    source_types = [
+        chunk.get("source_type", "transcript") if isinstance(chunk, dict) else "transcript"
+        for chunk in chunks
+    ]
+
     # aembed_documents batches all chunks into a single Gemini API call.
-    vectors = await embed_documents_with_rotation(chunks)
+    vectors = await embed_documents_with_rotation(chunk_texts)
 
     ids = [
         hashlib.md5(f"{data['url']}:chunk:{i}".encode()).hexdigest()
@@ -91,6 +100,7 @@ async def store_chunks(data: dict, chunks: list[str]) -> int:
             "comments": str(data.get("comments") or 0),
             "duration": str(data.get("duration") or 0),
             "hashtags": ",".join(data.get("hashtags") or []),
+            "source_type": source_types[i],
         }
         for i in range(len(chunks))
     ]
@@ -99,7 +109,7 @@ async def store_chunks(data: dict, chunks: list[str]) -> int:
     collection.upsert(
         ids=ids,
         embeddings=vectors,
-        documents=chunks,
+        documents=chunk_texts,
         metadatas=metadatas,
     )
 
