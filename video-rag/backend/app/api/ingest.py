@@ -69,12 +69,12 @@ async def ingest_videos(request: IngestRequest):
                 if description_clean and description_clean != transcript_clean:
                     d_chunks = get_chunks(description)
                     for dc in d_chunks:
-                        chunks.append({"text": f"Description: {dc}", "source_type": "transcript"})
+                        chunks.append({"text": f"Description: {dc}", "source_type": "description"})
                     logger.info("DEBUG: Video %s - created %d description chunks", vid, len(d_chunks))
                 
                 # 3. Hashtags chunk
                 if hashtags:
-                    chunks.append({"text": "Hashtags: " + ", ".join(hashtags), "source_type": "transcript"})
+                    chunks.append({"text": "Hashtags: " + ", ".join(hashtags), "source_type": "hashtags"})
                     logger.info("DEBUG: Video %s - added hashtags chunk", vid)
             else:
                 chunks.append({

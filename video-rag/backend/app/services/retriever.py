@@ -10,6 +10,13 @@ logger = logging.getLogger(__name__)
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_data")
 COLLECTION_NAME = "video_chunks"
 
+SOURCE_TYPE_PRIORITY = {
+    "transcript": 0,
+    "description": 1,
+    "hashtags": 2,
+    "metadata_fallback": 3,
+}
+
 def get_video_metadata(url_or_id: str) -> dict:
     """
     Pull stored metadata from the first chunk belonging to this video URL or video ID ("A" or "B").
@@ -110,6 +117,30 @@ def get_all_chunks_for_video_id(video_id: str) -> list[dict]:
         return []
 
 
+def _normalize_source_type(chunk: dict) -> str:
+    metadata = chunk.get("metadata") or {}
+    source_type = metadata.get("source_type") or "transcript"
+    text = (chunk.get("text") or "").lstrip()
+
+    if text.startswith("Description:"):
+        return "description"
+    if text.startswith("Hashtags:"):
+        return "hashtags"
+    if source_type in SOURCE_TYPE_PRIORITY:
+        return source_type
+    return "transcript"
+
+
+def _chunk_rank_key(chunk: dict) -> tuple[int, str, int]:
+    metadata = chunk.get("metadata") or {}
+    source_type = _normalize_source_type(chunk)
+    return (
+        SOURCE_TYPE_PRIORITY.get(source_type, SOURCE_TYPE_PRIORITY["metadata_fallback"]),
+        metadata.get("video_id", "A"),
+        metadata.get("chunk_index", 0),
+    )
+
+
 def retrieve(
     question: str,
     url_a: str,
@@ -155,16 +186,11 @@ def retrieve(
             seen_texts.add(text_sig)
             merged_chunks.append(c)
 
-    # Sort merged chunks: Video A chunks first (ordered by chunk_index), then Video B chunks (ordered by chunk_index)
-    def sort_key(chunk):
-        video_id = chunk["metadata"].get("video_id", "A")
-        chunk_idx = chunk["metadata"].get("chunk_index", 0)
-        return (video_id, chunk_idx)
-
-    merged_chunks.sort(key=sort_key)
+    # Rank by source type first, then keep stable video/chunk ordering within each tier.
+    merged_chunks.sort(key=_chunk_rank_key)
 
     logger.info(
         "Retrieved %d total chunks (similarity=%d, direct=%d) | filter=%s | question=%s",
         len(merged_chunks), len(similarity_chunks), len(direct_chunks), video_filter, question[:60],
     )
-    return merged_chunks
+    return merged_chunks
