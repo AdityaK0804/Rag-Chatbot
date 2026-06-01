@@ -1,0 +1,8 @@
+{
+    "python-envs.pythonProjects": [],
+    "python.defaultInterpreterPath": "${workspaceFolder}/video-rag/backend/venv/Scripts/python.exe",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/video-rag/backend/venv/Lib/site-packages"
+    ],
+    "css.lint.unknownAtRules": "ignore"
+}

@@ -1,0 +1,30 @@
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# Data validation
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# LangChain core + integrations
+langchain==0.3.9
+langchain-openai==0.2.12
+langchain-chroma==0.1.4
+langchain-community==0.3.9
+langchain-google-genai==2.1.5
+
+# Vector DB
+chromadb==0.5.23
+
+# OpenAI client (langchain-openai depends on this, pinning for stability)
+openai==1.57.4
+
+# Transcript + metadata fetching
+yt-dlp==2024.12.13
+youtube-transcript-api==0.6.3
+
+# Async HTTP (used for any outbound calls that need to be non-blocking)
+httpx==0.28.1
+
+# Env file loading
+python-dotenv==1.0.1
