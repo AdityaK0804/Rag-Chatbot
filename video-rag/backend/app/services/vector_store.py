@@ -5,7 +5,14 @@ import os
 import chromadb
 from langchain_chroma import Chroma
 
-from app.services.embedder import get_embedder
+from app.services.embedder import embed_documents_with_rotation, get_embedder
+from app.services.gemini_errors import (
+    INVALID_API_KEY_MESSAGE,
+    QUOTA_EXCEEDED_MESSAGE,
+    UserFacingGeminiError,
+    is_quota_error,
+)
+from app.services.gemini_keys import load_gemini_keys, log_key_usage
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +34,12 @@ def _get_raw_collection() -> chromadb.Collection:
     )
 
 
-def get_langchain_store() -> Chroma:
+def get_langchain_store(embedder=None) -> Chroma:
     """LangChain Chroma wrapper used for retrieval and as_retriever()."""
+    embedding_function = embedder or get_embedder()
     return Chroma(
         collection_name=COLLECTION_NAME,
-        embedding_function=get_embedder(),
+        embedding_function=embedding_function,
         persist_directory=CHROMA_DIR,
         collection_metadata={"hnsw:space": "cosine"},
     )
@@ -60,10 +68,8 @@ async def store_chunks(data: dict, chunks: list[str]) -> int:
         logger.warning("No chunks to store for video %s", data.get("video_id"))
         return 0
 
-    embedder = get_embedder()
-
-    # aembed_documents batches all chunks into a single OpenAI API call.
-    vectors = await embedder.aembed_documents(chunks)
+    # aembed_documents batches all chunks into a single Gemini API call.
+    vectors = await embed_documents_with_rotation(chunks)
 
     ids = [
         hashlib.md5(f"{data['url']}:chunk:{i}".encode()).hexdigest()
@@ -110,7 +116,9 @@ def query_chunks(
     Retrieve top-n chunks relevant to the question.
     video_id_filter: a single video ID ("A" or "B") or list of video IDs to filter by.
     """
-    store = get_langchain_store()
+    keys = load_gemini_keys()
+    if not keys:
+        raise UserFacingGeminiError(INVALID_API_KEY_MESSAGE)
 
     search_kwargs: dict = {"k": n_results}
     if video_id_filter:
@@ -119,9 +127,28 @@ def query_chunks(
         else:
             search_kwargs["filter"] = {"video_id": video_id_filter}
 
-    results = store.similarity_search_with_relevance_scores(
-        question, **search_kwargs
-    )
+    last_quota_error: BaseException | None = None
+    results = None
+    for key in keys:
+        log_key_usage(key, len(keys), "query")
+        try:
+            store = get_langchain_store(get_embedder(api_key=key.key))
+            results = store.similarity_search_with_relevance_scores(
+                question, **search_kwargs
+            )
+            last_quota_error = None
+            break
+        except Exception as exc:
+            if is_quota_error(exc):
+                last_quota_error = exc
+                logger.warning("Gemini embedding quota hit during query with key %s; rotating.", key.label)
+                continue
+            raise
+
+    if last_quota_error:
+        raise UserFacingGeminiError(QUOTA_EXCEEDED_MESSAGE) from last_quota_error
+    if results is None:
+        raise UserFacingGeminiError(INVALID_API_KEY_MESSAGE)
 
     filtered_results = []
     for doc, score in results:
@@ -159,4 +186,4 @@ def delete_video_chunks(video_id: str):
         collection.delete(where={"video_id": video_id})
         logger.info("Deleted all existing chunks for video %s from ChromaDB", video_id)
     except Exception as e:
-        logger.warning("Failed to delete chunks for video %s: %s", video_id, e)
+        logger.warning("Failed to delete chunks for video %s: %s", video_id, e)

@@ -15,6 +15,7 @@ class VideoMeta(BaseModel):
     upload_date: str
     duration: int          # seconds
     thumbnail: str
+    thumbnail_alternates: list[str] = []
     engagement_rate: float | None = None
     chunks_stored: int
     already_indexed: bool = False

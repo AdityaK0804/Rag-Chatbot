@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { VideoMeta } from '@/types'
+import { API_URL } from '@/lib/api'
 
 
 interface VideoCardProps {
@@ -27,10 +28,87 @@ function fmtDate(raw: string): string {
 export function VideoCard({ video, label }: VideoCardProps) {
     const isA = label === 'A'
     const isInstagram = video.platform === 'instagram'
-    const [imageError, setImageError] = useState(false)
 
-    const imageSrc = !imageError && video.thumbnail ? video.thumbnail : '/video-placeholder.jpg'
-    const showUnavailableBadge = !video.thumbnail || imageError
+    type ThumbnailSource = { src: string; kind: 'direct' | 'proxy' | 'placeholder'; original?: string }
+
+    const thumbnailSources = useMemo<ThumbnailSource[]>(() => {
+        const direct = [video.thumbnail, ...(video.thumbnail_alternates ?? [])].filter(Boolean)
+        const sources: ThumbnailSource[] = []
+        const seen = new Set<string>()
+
+        const push = (source: ThumbnailSource) => {
+            if (!seen.has(source.src)) {
+                seen.add(source.src)
+                sources.push(source)
+            }
+        }
+
+        direct.forEach(src => push({ src, kind: 'direct' }))
+        direct.forEach(src =>
+            push({
+                src: `${API_URL}/api/thumbnail?url=${encodeURIComponent(src)}`,
+                kind: 'proxy',
+                original: src,
+            })
+        )
+        push({ src: '/video-placeholder.jpg', kind: 'placeholder' })
+
+        return sources
+    }, [video.thumbnail, video.thumbnail_alternates])
+
+    const [sourceIndex, setSourceIndex] = useState(0)
+
+    useEffect(() => {
+        setSourceIndex(0)
+    }, [video.thumbnail, video.thumbnail_alternates])
+
+    const activeSource = thumbnailSources[sourceIndex] ?? { src: '/video-placeholder.jpg', kind: 'placeholder' }
+    const imageSrc = activeSource.src
+    const directCount = (video.thumbnail ? 1 : 0) + (video.thumbnail_alternates?.length ?? 0)
+    const showUnavailableBadge = directCount === 0 || activeSource.kind === 'placeholder'
+
+    const logThumbnailFailure = async (source: ThumbnailSource) => {
+        if (source.kind === 'placeholder') return
+
+        const target = source.original ?? source.src
+        let status: number | null = null
+        let reason = 'Unknown'
+
+        try {
+            const res = await fetch(`${API_URL}/api/thumbnail?url=${encodeURIComponent(target)}&mode=status`)
+            if (res.ok) {
+                const data = await res.json() as { status?: number }
+                status = typeof data.status === 'number' ? data.status : res.status
+            } else {
+                status = res.status
+            }
+            reason = status ? `HTTP ${status}` : 'Status unavailable'
+        } catch {
+            reason = source.kind === 'direct' ? 'CORS/Network error' : 'Proxy request failed'
+        }
+
+        console.warn('Thumbnail failed', {
+            video: label,
+            src: source.src,
+            kind: source.kind,
+            status,
+            reason,
+        })
+    }
+
+    const handleThumbnailError = () => {
+        const current = thumbnailSources[sourceIndex] ?? activeSource
+        void logThumbnailFailure(current)
+        setSourceIndex(prev => Math.min(prev + 1, thumbnailSources.length - 1))
+    }
+
+    const handleThumbnailLoad = () => {
+        console.info('Thumbnail rendered', {
+            video: label,
+            src: activeSource.src,
+            kind: activeSource.kind,
+        })
+    }
 
     const platformBadge = isInstagram ? (
         <span className="bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600 text-white font-code text-[10px] px-2.5 py-1 rounded font-bold uppercase tracking-wide">
@@ -50,7 +128,8 @@ export function VideoCard({ video, label }: VideoCardProps) {
                 <img
                     src={imageSrc}
                     alt={video.title}
-                    onError={() => setImageError(true)}
+                    onError={handleThumbnailError}
+                    onLoad={handleThumbnailLoad}
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>

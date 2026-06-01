@@ -15,6 +15,39 @@ logger = logging.getLogger(__name__)
 INSTAGRAM_COOKIES_FILE = os.getenv("INSTAGRAM_COOKIES_FILE", "")
 
 
+def _extract_thumbnail_urls(info: dict | None, video_id: str) -> tuple[str, list[str]]:
+    if not info:
+        logger.info("Thumbnail extracted for video %s: None", video_id)
+        return "", []
+
+    raw_thumbnail = info.get("thumbnail") or ""
+    candidates: list[str] = []
+    if raw_thumbnail:
+        candidates.append(raw_thumbnail)
+
+    thumbnails = info.get("thumbnails") or []
+    for thumb in thumbnails:
+        url = thumb.get("url") if isinstance(thumb, dict) else None
+        if url:
+            candidates.append(url)
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for url in candidates:
+        if url and url not in seen:
+            seen.add(url)
+            unique.append(url)
+
+    primary = unique[0] if unique else ""
+    alternates = unique[1:]
+
+    logger.info("Thumbnail extracted for video %s: %s", video_id, raw_thumbnail or "None")
+    if alternates:
+        logger.info("Thumbnail alternates for video %s: %s", video_id, alternates)
+
+    return primary, alternates
+
+
 def _get_youtube_id(url: str) -> str | None:
     """
     Handles all YouTube URL formats:
@@ -134,6 +167,7 @@ def _default_data(url: str, video_id: str, platform: str) -> dict:
         "upload_date": "",
         "duration": 0,
         "thumbnail": "",
+        "thumbnail_alternates": [],
         "engagement_rate": None,
     }
 
@@ -168,6 +202,8 @@ def _fetch_youtube_sync(url: str, video_id: str) -> dict:
         views_val = views
         engagement_rate = compute_engagement_rate(likes, comments, views)
 
+    thumbnail, thumbnail_alternates = _extract_thumbnail_urls(info, video_id)
+
     return {
         "video_id": video_id,
         "url": url,
@@ -183,7 +219,8 @@ def _fetch_youtube_sync(url: str, video_id: str) -> dict:
         "hashtags": info.get("tags") or [],
         "upload_date": info.get("upload_date") or "",
         "duration": int(round(float(info.get("duration") or 0))),
-        "thumbnail": info.get("thumbnail") or "",
+        "thumbnail": thumbnail,
+        "thumbnail_alternates": thumbnail_alternates,
         "engagement_rate": engagement_rate,
     }
 
@@ -213,6 +250,8 @@ def _fetch_instagram_sync(url: str, video_id: str) -> dict:
     if not hashtags and transcript_text:
         hashtags = extract_hashtags(transcript_text)
 
+    thumbnail, thumbnail_alternates = _extract_thumbnail_urls(info, video_id)
+
     return {
         "video_id": video_id,
         "url": url,
@@ -228,7 +267,8 @@ def _fetch_instagram_sync(url: str, video_id: str) -> dict:
         "hashtags": hashtags,
         "upload_date": info.get("upload_date") or "",
         "duration": int(round(float(info.get("duration") or 0))),
-        "thumbnail": info.get("thumbnail") or "",
+        "thumbnail": thumbnail,
+        "thumbnail_alternates": thumbnail_alternates,
         "engagement_rate": engagement_rate,
     }
 

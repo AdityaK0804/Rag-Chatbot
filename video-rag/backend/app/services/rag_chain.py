@@ -7,6 +7,15 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from app.services.gemini_errors import (
+    GENERIC_AI_ERROR_MESSAGE,
+    INVALID_API_KEY_MESSAGE,
+    QUOTA_EXCEEDED_MESSAGE,
+    UserFacingGeminiError,
+    get_gemini_user_message,
+    is_quota_error,
+)
+from app.services.gemini_keys import load_gemini_keys, log_key_usage
 from app.services.retriever import get_video_metadata, retrieve
 
 # Ensure environment variables are loaded
@@ -24,17 +33,25 @@ def clear_session_state():
     memory_store.clear()
 
 
-def get_llm() -> ChatGoogleGenerativeAI:
+def _get_gemini_timeout_seconds() -> float:
+    try:
+        return float(os.getenv("GEMINI_REQUEST_TIMEOUT_SECONDS", "45"))
+    except ValueError:
+        return 45.0
+
+
+def get_llm(api_key: str | None = None) -> ChatGoogleGenerativeAI:
     # Reload environment variables from .env dynamically to pick up updates without restart
     load_dotenv(override=True)
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY is not set in environment or .env file.")
+        raise UserFacingGeminiError(INVALID_API_KEY_MESSAGE)
     return ChatGoogleGenerativeAI(
         model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         temperature=0.3,
         google_api_key=api_key,
         max_output_tokens=4000,
+        timeout=_get_gemini_timeout_seconds(),
     )
 
 
@@ -165,7 +182,22 @@ RULES:
   * Use section headers (## and ###) for major headings.
   * Use bold text (**word**) to highlight key metrics, insights, and video labels.
   * Use bullet points (- or *) with proper spacing to make lists readable.
-  * Use markdown tables where comparative structured data is appropriate.
+  * When comparing or evaluating both videos, use this exact structure:
+    ## Reach
+    - Video A: <reach metric or "Not Available">
+    - Video B: <reach metric or "Not Available">
+
+    ## Engagement
+    - Video A: <engagement rate or "N/A"> (Likes: <likes>, Comments: <comments>, Interactions: <total>)
+    - Video B: <engagement rate or "N/A"> (Likes: <likes>, Comments: <comments>, Interactions: <total>)
+
+    ## Content Analysis
+    <Short paragraph analysis>
+
+    ## Recommendation
+    - <Actionable bullet>
+  * Avoid inline labels like "Views:" or "Engagement:" inside paragraphs.
+  * Use markdown tables only when a table is explicitly requested.
 
 AUDIENCE LOYALTY RULE:
 If the user asks:
@@ -185,9 +217,15 @@ Neither metric alone proves audience loyalty."
     if is_compare_query:
         comparison_instruction = """
 SUMMARY ONLY RULE:
-A comparison table has already been shown to the user.
-You MUST NOT output another comparison table, list of metrics, or repeat the values.
-Instead, write a brief, high-level summary paragraph (2-3 sentences) explaining the differences or performance highlights based ONLY on these metrics, bearing in mind the missing views/engagement limitations.
+A Reach/Engagement summary has already been shown to the user.
+You MUST NOT output another list of metrics, repeat values, or show a table.
+Write exactly two sections:
+
+## Content Analysis
+2-4 concise sentences explaining the differences or performance highlights based ONLY on available metrics and retrieved content.
+
+## Recommendation
+- 2-4 actionable bullet points for the creator.
 """
         return prompt_prefix + comparison_instruction
     else:
@@ -195,29 +233,21 @@ Instead, write a brief, high-level summary paragraph (2-3 sentences) explaining 
 COMPARE BOTH VIDEOS TEMPLATE RULE:
 If the user asks a broad comparison request (such as "Compare both videos", "compare them", or similar general comparison requests), you MUST format your comparison using the following structured template instead of writing free-form paragraphs:
 
-## Performance Comparison
-
-### Views
+## Reach
 - Video A: <value or "Not Available">
 - Video B: <value or "Not Available">
 
-### Engagement
-- Video A: <value or "N/A">
-- Video B: <value or "N/A">
+## Engagement
+- Video A: <engagement rate or "N/A"> (Likes: <likes>, Comments: <comments>, Interactions: <total>)
+- Video B: <engagement rate or "N/A"> (Likes: <likes>, Comments: <comments>, Interactions: <total>)
 
-### Interactions
-- Video A: <total interactions> (Likes: <likes>, Comments: <comments>)
-- Video B: <total interactions> (Likes: <likes>, Comments: <comments>)
+## Content Analysis
+<Short paragraph analysis>
 
-### Duration
-- Video A: <duration> seconds
-- Video B: <duration> seconds
+## Recommendation
+- <Actionable bullet>
 
-### Platform
-- Video A: <platform>
-- Video B: <platform>
-
-(Note: Follow this template with a brief, high-level summary explaining the differences or performance highlights based ONLY on these metrics, bearing in mind the missing views/engagement limitations)."""
+(Note: Keep it concise. Do not repeat metrics outside the Reach/Engagement sections.)"""
         return prompt_prefix + compare_rule
 
 
@@ -501,36 +531,20 @@ async def stream_response(
             comments_b = meta_b.get("comments") or 0
             total_b = likes_b + comments_b
             
-            duration_a_str = f"{meta_a.get('duration')} seconds" if meta_a.get('duration') else "0 seconds"
-            duration_b_str = f"{meta_b.get('duration')} seconds" if meta_b.get('duration') else "0 seconds"
-            
-            platform_a_str = format_platform(meta_a.get("platform"))
-            platform_b_str = format_platform(meta_b.get("platform"))
-            
-            comparison_table = (
-                f"## Performance Comparison\n\n"
-                f"### Views\n"
+            comparison_sections = (
+                f"## Reach\n"
                 f"- Video A: {views_a_str}\n"
                 f"- Video B: {views_b_str}\n\n"
-                f"### Engagement\n"
-                f"- Video A: {rate_a_str}\n"
-                f"- Video B: {rate_b_str}\n\n"
-                f"### Interactions\n"
-                f"- Video A: {total_a:,} (Likes: {likes_a:,}, Comments: {comments_a:,})\n"
-                f"- Video B: {total_b:,} (Likes: {likes_b:,}, Comments: {comments_b:,})\n\n"
-                f"### Duration\n"
-                f"- Video A: {duration_a_str}\n"
-                f"- Video B: {duration_b_str}\n\n"
-                f"### Platform\n"
-                f"- Video A: {platform_a_str}\n"
-                f"- Video B: {platform_b_str}\n\n"
+                f"## Engagement\n"
+                f"- Video A: {rate_a_str} (Likes: {likes_a:,}, Comments: {comments_a:,}, Interactions: {total_a:,})\n"
+                f"- Video B: {rate_b_str} (Likes: {likes_b:,}, Comments: {comments_b:,}, Interactions: {total_b:,})\n\n"
             )
-            full_response += comparison_table
-            async for ev in yield_event("token", {"content": comparison_table}):
+            full_response += comparison_sections
+            async for ev in yield_event("token", {"content": comparison_sections}):
                 yield ev
 
         # 3. Stream from Google GenAI Model
-        llm = get_llm()
+        llm_timeout = _get_gemini_timeout_seconds()
         history = memory.chat_memory.messages
         system_prompt = _build_system_prompt(meta_a, meta_b, chunks, is_compare_query=is_compare_all)
 
@@ -538,31 +552,65 @@ async def stream_response(
         messages.extend(history)
         messages.append(HumanMessage(content=question))
 
-        astream_chunks_count = 0
-        try:
-            async for chunk in llm.astream(messages):
-                token = chunk.content
-                if token:
-                    astream_chunks_count += 1
-                    full_response += token
-                    async for ev in yield_event("token", {"content": token}):
-                        yield ev
-        except Exception as stream_err:
-            logger.warning("astream error, falling back to ainvoke: %s", stream_err)
+        keys = load_gemini_keys()
+        if not keys:
+            raise UserFacingGeminiError(INVALID_API_KEY_MESSAGE)
 
-        # 4. Fallback to ainvoke if astream failed or returned empty content
-        if not full_response.strip() or astream_chunks_count == 0:
-            logger.info("astream returned no content. Falling back to ainvoke.")
-            response = await llm.ainvoke(messages)
-            content = response.content
-            if content:
-                import re
-                words = re.split(r'(\s+)', content)
-                for word in words:
-                    if word:
-                        full_response += word
-                        async for ev in yield_event("token", {"content": word}):
+        astream_chunks_count = 0
+        last_quota_error: BaseException | None = None
+
+        for key in keys:
+            log_key_usage(key, len(keys), "chat")
+            llm = get_llm(api_key=key.key)
+            astream_chunks_count = 0
+
+            try:
+                async for chunk in llm.astream(messages, timeout=llm_timeout):
+                    token = chunk.content
+                    if token:
+                        astream_chunks_count += 1
+                        full_response += token
+                        async for ev in yield_event("token", {"content": token}):
                             yield ev
+            except Exception as stream_err:
+                if is_quota_error(stream_err) and astream_chunks_count == 0:
+                    last_quota_error = stream_err
+                    logger.warning("Gemini quota hit with key %s; rotating.", key.label)
+                    continue
+                user_message = get_gemini_user_message(stream_err)
+                if user_message:
+                    raise UserFacingGeminiError(user_message) from stream_err
+                logger.warning("astream error, falling back to ainvoke: %s", stream_err)
+
+            # Fallback to ainvoke if astream failed or returned empty content
+            if astream_chunks_count == 0:
+                logger.info("astream returned no content. Falling back to ainvoke.")
+                try:
+                    response = await llm.ainvoke(messages, timeout=llm_timeout)
+                except Exception as invoke_err:
+                    if is_quota_error(invoke_err) and astream_chunks_count == 0:
+                        last_quota_error = invoke_err
+                        logger.warning("Gemini quota hit with key %s; rotating.", key.label)
+                        continue
+                    user_message = get_gemini_user_message(invoke_err)
+                    if user_message:
+                        raise UserFacingGeminiError(user_message) from invoke_err
+                    raise
+                content = response.content
+                if content:
+                    import re
+                    words = re.split(r'(\s+)', content)
+                    for word in words:
+                        if word:
+                            full_response += word
+                            async for ev in yield_event("token", {"content": word}):
+                                yield ev
+
+            last_quota_error = None
+            break
+
+        if last_quota_error:
+            raise UserFacingGeminiError(QUOTA_EXCEEDED_MESSAGE) from last_quota_error
 
         # 5. Persist turn to memory only after successful generation
         if full_response.strip():
@@ -628,10 +676,16 @@ async def stream_response(
         async for ev in yield_event("done", {}):
             yield ev
 
+    except UserFacingGeminiError as e:
+        logger.warning("Gemini request failed with user-facing error: %s", e.user_message)
+        async for ev in yield_event("token", {"content": e.user_message}):
+            yield ev
+        async for ev in yield_event("done", {}):
+            yield ev
+
     except Exception as e:
         logger.error("Error in stream_response: %s", e, exc_info=True)
-        # Yield the error token to frontend
-        error_msg = f"Error generating response: {e}"
+        error_msg = get_gemini_user_message(e) or GENERIC_AI_ERROR_MESSAGE
         async for ev in yield_event("token", {"content": error_msg}):
             yield ev
         async for ev in yield_event("done", {}):
@@ -641,4 +695,4 @@ async def stream_response(
     logger.info("STREAM SUMMARY:")
     logger.info("  - Chunk Count: %d", chunk_count)
     logger.info("  - Final Response Length: %d characters", len(full_response))
-    logger.info("  - Raw Response: %s", full_response)
+    logger.info("  - Raw Response: %s", full_response)

@@ -12,6 +12,7 @@ export interface VideoMeta {
     upload_date: string
     duration: number
     thumbnail: string
+    thumbnail_alternates?: string[]
     engagement_rate: number | null
     chunks_stored: number
     already_indexed?: boolean

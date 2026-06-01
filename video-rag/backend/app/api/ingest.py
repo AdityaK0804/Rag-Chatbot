@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.models.request import IngestRequest
 from app.models.response import IngestResponse, VideoMeta
+from app.services.gemini_errors import get_gemini_user_message
 from app.services.transcript import fetch_video_data
 from app.services.vector_store import store_chunks, get_chunk_count, delete_video_chunks
 from app.utils.cache import is_cached, mark_cached, clear_cache
@@ -85,7 +86,14 @@ async def ingest_videos(request: IngestRequest):
                 creator = data.get("creator") or "Unknown"
                 chunks = [f"Video Title: {title} | Creator: {creator} | [No transcript or description available]"]
 
-            chunks_stored = await store_chunks(data, chunks)
+            try:
+                chunks_stored = await store_chunks(data, chunks)
+            except Exception as exc:
+                user_message = get_gemini_user_message(exc)
+                if user_message:
+                    logger.warning("Gemini embedding failed during ingestion: %s", user_message)
+                    raise HTTPException(status_code=503, detail=user_message) from exc
+                raise
             logger.info("DEBUG: Video %s - number of chunks actually stored: %d", vid, chunks_stored)
             mark_cached(data["url"])
 
@@ -104,9 +112,16 @@ async def ingest_videos(request: IngestRequest):
             upload_date=data["upload_date"],
             duration=data["duration"],
             thumbnail=data["thumbnail"],
+            thumbnail_alternates=data.get("thumbnail_alternates") or [],
             engagement_rate=data["engagement_rate"],
             chunks_stored=chunks_stored,
             already_indexed=already_indexed,
+        )
+        logger.info(
+            "Thumbnail sent to frontend for video %s: %s (alternates=%d)",
+            vid,
+            data.get("thumbnail") or "None",
+            len(data.get("thumbnail_alternates") or []),
         )
 
     # Log/print the active video titles
