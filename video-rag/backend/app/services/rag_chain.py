@@ -274,6 +274,43 @@ If the user asks a broad comparison request (such as "Compare both videos", "com
         return prompt_prefix + compare_rule
 
 
+def _normalize_chunk_source_type(chunk: dict) -> str:
+    metadata = chunk.get("metadata") or {}
+    source_type = metadata.get("source_type") or "transcript"
+    text = (chunk.get("text") or "").lstrip()
+
+    if text.startswith("Description:"):
+        return "description"
+    if text.startswith("Hashtags:"):
+        return "hashtags"
+    if source_type in {"transcript", "description", "hashtags", "metadata_fallback"}:
+        return source_type
+    return "transcript"
+
+
+def _build_retrieval_debug_payload(chunks: list[dict], question: str) -> dict:
+    debug_chunks = []
+    for position, chunk in enumerate(chunks, start=1):
+        metadata = chunk.get("metadata") or {}
+        text = chunk.get("text") or ""
+        debug_chunks.append({
+            "position": position,
+            "video_id": metadata.get("video_id"),
+            "chunk_index": metadata.get("chunk_index"),
+            "source": chunk.get("source"),
+            "source_type": _normalize_chunk_source_type(chunk),
+            "retrieval_origin": chunk.get("retrieval_origin", "unknown"),
+            "score": chunk.get("score"),
+            "text": text,
+        })
+
+    return {
+        "question": question,
+        "chunk_count": len(debug_chunks),
+        "chunks": debug_chunks,
+    }
+
+
 def format_platform(platform: str) -> str:
     if not platform:
         return "Unknown"
@@ -400,6 +437,10 @@ async def stream_response(
         meta_a = get_video_metadata("A")
         meta_b = get_video_metadata("B")
         memory = get_memory(session_id)
+
+        retrieval_debug = _build_retrieval_debug_payload(chunks, question)
+        async for ev in yield_event("retrieval_debug", retrieval_debug):
+            yield ev
 
         # 2. Deterministic guards
         q_clean = "".join(c for c in question.lower() if c.isalnum() or c.isspace()).strip()

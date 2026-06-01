@@ -108,6 +108,7 @@ def get_all_chunks_for_video_id(video_id: str) -> list[dict]:
                 "metadata": meta,
                 "score": 1.0,
                 "source": f"Video {meta.get('video_id')} — chunk {meta.get('chunk_index')}",
+                "retrieval_origin": "direct",
             })
         
         chunks.sort(key=lambda x: x["metadata"].get("chunk_index", 0))

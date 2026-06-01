@@ -170,6 +170,7 @@ def query_chunks(
             "metadata": doc.metadata,
             "score": round(score, 4),
             "source": f"Video {doc.metadata.get('video_id')} — chunk {doc.metadata.get('chunk_index')}",
+            "retrieval_origin": "similarity",
         })
 
     return filtered_results
