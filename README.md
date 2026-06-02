@@ -71,6 +71,7 @@ For this challenge, ChromaDB was a good fit because:
 For production-scale, I would consider Pinecone, Qdrant, or Weaviate.
 
 **Why Gemini?**
+
 Gemini provides a strong balance between:
 
 - Response quality
@@ -79,6 +80,7 @@ Gemini provides a strong balance between:
 Since the chatbot mainly performs retrieval-based question answering rather than extremely complex reasoning, Gemini Flash offered good performance without increasing operating costs.
 
 **Handling Missing Data**
+
 One challenge i came up with was that the transcript and metadata for the videos from yt/insta were often incomplete.
 Ex:
 - YouTube transcripts may be unavailable
@@ -94,6 +96,7 @@ Instead of failing completely, the system uses fallback strategies.
 - Metadata fallback chunk
 
 **Metadata Fallback Chunk**
+
 When no transcript is available, the system creates a synthetic chunk containing:
 
 - Title
