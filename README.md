@@ -60,6 +60,7 @@ Video RAG ingests short videos, pulls whatever transcripts and metadata it can, 
 4)Design Decisions
 ---------------------------------
 **Why ChromaDB?**
+
 For this challenge, ChromaDB was a good fit because:
 
 - Easy local setup
