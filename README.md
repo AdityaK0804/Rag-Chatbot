@@ -12,6 +12,7 @@ The system ingest videos from the 2 platforms input by the user, extracts transc
 - *Suggest improvements for B based on what worked in A.*
 
 **1. Project overview**
+--------------------------------------
 Video RAG ingests short videos, pulls whatever transcripts and metadata it can, chops content into chunks, indexes them in ChromaDB, and then runs a Gemini-powered RAG chat that can answer questions like:
 
 - *Why did Video A get more engagement than Video B?*
