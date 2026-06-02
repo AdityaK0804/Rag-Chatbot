@@ -11,7 +11,7 @@ The system ingest videos from the 2 platforms input by the user, extracts transc
 - *Who's the creator of Video B and what's their follower count?*
 - *Suggest improvements for B based on what worked in A.*
 
-**1. Project overview**
+1. Project overview
 --------------------------------------
 Video RAG ingests short videos, pulls whatever transcripts and metadata it can, chops content into chunks, indexes them in ChromaDB, and then runs a Gemini-powered RAG chat that can answer questions like:
 
@@ -23,3 +23,5 @@ Video RAG ingests short videos, pulls whatever transcripts and metadata it can, 
 
 2.Features
 -----------------------------------
+- *Video Ingestion(Yt/Instagram)*
+- *Transcript extraction with fallback strategies*
