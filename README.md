@@ -37,9 +37,9 @@ Video RAG ingests short videos, pulls whatever transcripts and metadata it can, 
 3)Architecture
 -----------------------------------
 **FrontEnd:**
--*Next.js*
-*Typescript*
--*Tailwind CSS*
+- *Next.js*
+- *Typescript*
+- *Tailwind CSS*
 
 **BackEnd:**
 - *FastAPI*
