@@ -189,16 +189,23 @@ Because embeddings are generated once and reused, the architecture scales much b
 ----------------------------------
 **BackEnd:**
 cd video-rag/backend
+
 python -m venv venv
 
-# Windows
+
+**Windows**
 .\venv\Scripts\activate
+
 pip install -r requirements.txt
+
 uvicorn app.main:app --reload
+
 
 **Frontend**
 cd video-rag/frontend
+
 npm install
+
 npm run dev
 
 
