@@ -166,21 +166,27 @@ Because embeddings are generated once and reused, the architecture scales much b
 7)Tech Stack
 ----------------------------------
 **Frontend**
+
 - Next.js
 - TypeScript
 - Tailwind CSS
+
 **Backend**
 - FastAPI
 - Python
+  
 **AI & RAG**
 - LangChain
 - Google Gemini
 - Google Embeddings
+  
 **Storage**
 - ChromaDB
+  
 **Video Processing**
 - yt-dlp
 - YouTube Transcript API
+  
 **Deployment**
 - Vercel (Frontend)
 - Render (Backend)
@@ -188,12 +194,14 @@ Because embeddings are generated once and reused, the architecture scales much b
 8)Local Setup
 ----------------------------------
 **BackEnd:**
+
 cd video-rag/backend
 
 python -m venv venv
 
 
 **Windows**
+
 .\venv\Scripts\activate
 
 pip install -r requirements.txt
@@ -202,6 +210,7 @@ uvicorn app.main:app --reload
 
 
 **Frontend**
+
 cd video-rag/frontend
 
 npm install
