@@ -26,6 +26,8 @@ Video RAG ingests short videos, pulls whatever transcripts and metadata it can, 
 - *Video Ingestion(Yt/Instagram)*
 - *Transcript extraction with fallback strategies*
 - *Metadata extraction(views, likes, comments, creator, follower count, hashtags, upload date, duration)*
+- *Interaction calculation (Likes + Comments)*
+- *Engagement rate calculation ((Likes + Comments) / Views) × 100*
 - *LangChain-based RAG pipeline*
 - *ChromaDB vector storage*
 - *Gemini-powerd RAG chat with respone streaming*
