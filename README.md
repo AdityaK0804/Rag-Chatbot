@@ -21,3 +21,5 @@ Video RAG ingests short videos, pulls whatever transcripts and metadata it can, 
 - *Who's the creator of Video B and what's their follower count?*
 - *Suggest improvements for B based on what worked in A.*
 
+2.Features
+-----------------------------------
