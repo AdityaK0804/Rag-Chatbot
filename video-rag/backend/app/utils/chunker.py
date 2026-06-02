@@ -8,6 +8,7 @@ def get_metadata_fallback_chunk(data: dict) -> str:
         f"Platform: {data.get('platform') or ''}",
         f"Description: {data.get('description') or ''}",
         f"Views: {data.get('views') if data.get('views') is not None else ''}",
+        f"Followers: {data.get('follower_count') if data.get('follower_count') is not None else ''}",
         f"Likes: {data.get('likes') if data.get('likes') is not None else ''}",
         f"Comments: {data.get('comments') if data.get('comments') is not None else ''}",
         f"Duration: {data.get('duration') if data.get('duration') is not None else ''}",

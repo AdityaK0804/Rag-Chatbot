@@ -91,6 +91,7 @@ async def store_chunks(data: dict, chunks: list[str | dict]) -> int:
             "url": data["url"],
             "platform": data["platform"],
             "creator": data["creator"],
+            "follower_count": str(data.get("follower_count") or 0),
             "chunk_index": i,
             # ChromaDB metadata values must be str/int/float/bool.
             "engagement_rate": str(data["engagement_rate"]) if data.get("engagement_rate") is not None else "None",

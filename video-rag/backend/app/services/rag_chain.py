@@ -137,6 +137,7 @@ You have access to the following static video metadata for both videos:
 VIDEO A:
 - Title: {meta_a.get('title', 'Video A')}
 - Creator: {meta_a.get('creator', 'Unknown')}
+- Followers: {format_followers(meta_a)}
 - Platform: {platform_a}
 - Engagement Rate: {rate_a}
 - Views: {views_a}
@@ -148,6 +149,7 @@ VIDEO A:
 VIDEO B:
 - Title: {meta_b.get('title', 'Video B')}
 - Creator: {meta_b.get('creator', 'Unknown')}
+- Followers: {format_followers(meta_b)}
 - Platform: {platform_b}
 - Engagement Rate: {rate_b}
 - Views: {views_b}
@@ -184,6 +186,7 @@ When comparing performance or giving feedback:
 
 RULES:
 - Use the static video metadata to answer questions about metrics (views, likes, comments, engagement rate, duration), creators, or titles.
+- Use follower_count from static metadata when it is present. Do not guess it from other signals.
 - Use the retrieved context for questions about the actual content, transcript, topics, hooks, or video scripts.
 - If the retrieved context is empty, sparse, or doesn't contain content chunks, you MUST state that the actual video transcript/content is unavailable, and proceed to compare the videos based ONLY on the provided static metadata (title, creator, platform, views, likes, comments, duration). Do not make up or assume any video content details.
 - Do NOT say data is unavailable or return "N/A" if the metric is present in the static video metadata above.
@@ -363,6 +366,25 @@ def format_platform(platform: str) -> str:
     if "instagram" in p_lower:
         return "Instagram"
     return platform.capitalize()
+
+
+def format_followers(meta: dict) -> str:
+    followers = meta.get("follower_count")
+    try:
+        followers_int = int(followers)
+    except (TypeError, ValueError):
+        return "Not Available"
+    return f"{followers_int:,}" if followers_int > 0 else "Not Available"
+
+
+def is_follower_query(question: str) -> bool:
+    q_clean = "".join(c for c in question.lower() if c.isalnum() or c.isspace()).strip()
+    return "follower" in q_clean or "followers" in q_clean or "audience size" in q_clean
+
+
+def is_creator_query(question: str) -> bool:
+    q_clean = "".join(c for c in question.lower() if c.isalnum() or c.isspace()).strip()
+    return "creator" in q_clean or "who made" in q_clean or "who's the creator" in q_clean or "whos the creator" in q_clean
 
 
 def is_video_referenced(response_text: str, label: str, meta: dict) -> bool:
@@ -556,15 +578,130 @@ async def stream_response(
             any(comp in q_clean for comp in ["compare", "comparison", "more", "higher", "greater", "winner", "better", "versus", "vs", "difference", "performance"])
         )
 
-        if is_rate_missing and is_engagement_query:
-            ans = "Direct engagement comparison is not possible because one video's engagement rate cannot be calculated."
+        if is_engagement_query:
+            # If engagement rate is missing, allow the query to proceed when other signals exist:
+            # - likes/comments/views are present for either video, OR
+            # - there is retrieved content (transcript/description/hashtags) beyond metadata fallback.
+            def _has_engagement_metrics(meta: dict) -> bool:
+                try:
+                    likes = meta.get("likes")
+                    comments = meta.get("comments")
+                    views = meta.get("views")
+                    if (likes and int(likes) > 0) or (comments and int(comments) > 0):
+                        return True
+                    if views is not None and views != "None":
+                        try:
+                            if int(views) > 0:
+                                return True
+                        except Exception:
+                            return True
+                except Exception:
+                    pass
+                return False
+
+            has_metric_a = _has_engagement_metrics(meta_a)
+            has_metric_b = _has_engagement_metrics(meta_b)
+
+            # Check for meaningful retrieved content (not just metadata_fallback)
+            has_content = False
+            for c in chunks:
+                try:
+                    if _normalize_chunk_source_type(c) != "metadata_fallback":
+                        has_content = True
+                        break
+                except Exception:
+                    continue
+
+            # Only refuse if engagement rate is missing AND there are no alternative metrics or content
+            if is_rate_missing and not (has_metric_a or has_metric_b or has_content):
+                ans = "Direct engagement comparison is not possible because one video's engagement rate cannot be calculated."
+                full_response = ans
+                import re
+                for part in re.split(r'(\s+)', ans):
+                    if part:
+                        async for ev in yield_event("token", {"content": part}):
+                            yield ev
+                
+                citations = [
+                    _build_static_metadata_citation("A", meta_a, "A"),
+                    _build_static_metadata_citation("B", meta_b, "B"),
+                ]
+                async for ev in yield_event("citations", {"citations": citations}):
+                    yield ev
+                async for ev in yield_event("done", {}):
+                    yield ev
+
+                memory.chat_memory.add_user_message(question)
+                memory.chat_memory.add_ai_message(ans)
+                return
+
+        # Follower-count questions should resolve directly from metadata when possible.
+        if is_follower_query(question):
+            def _fmt_followers(value):
+                try:
+                    numeric = int(value)
+                except (TypeError, ValueError):
+                    return "Not Available"
+                return f"{numeric:,}" if numeric > 0 else "Not Available"
+
+            wants_creator = is_creator_query(question)
+            creator_a = meta_a.get("creator") or "Not Available"
+            creator_b = meta_b.get("creator") or "Not Available"
+            follower_a_str = _fmt_followers(meta_a.get("follower_count"))
+            follower_b_str = _fmt_followers(meta_b.get("follower_count"))
+
+            if wants_creator and ("video a" in q_clean or "creator a" in q_clean):
+                ans = (
+                    f"Creator: {creator_a}\n\n"
+                    f"Follower count: {follower_a_str}\n"
+                )
+            elif wants_creator and ("video b" in q_clean or "creator b" in q_clean):
+                ans = (
+                    f"Creator: {creator_b}\n\n"
+                    f"Follower count: {follower_b_str}\n"
+                )
+            elif wants_creator and any(word in q_clean for word in ["compare", "more", "higher", "greater", "winner"]):
+                ans = (
+                    "## Creator / Followers\n"
+                    f"- Video A: Creator: {creator_a}, Follower count: {follower_a_str}\n"
+                    f"- Video B: Creator: {creator_b}, Follower count: {follower_b_str}\n"
+                )
+            elif wants_creator:
+                ans = (
+                    f"Creator: {creator_a}\n\n"
+                    f"Follower count: {follower_a_str}\n"
+                ) if ("video a" in q_clean or "creator a" in q_clean) else (
+                    f"Creator: {creator_b}\n\n"
+                    f"Follower count: {follower_b_str}\n"
+                ) if ("video b" in q_clean or "creator b" in q_clean) else (
+                    "## Creator / Followers\n"
+                    f"- Video A: Creator: {creator_a}, Follower count: {follower_a_str}\n"
+                    f"- Video B: Creator: {creator_b}, Follower count: {follower_b_str}\n"
+                )
+            elif any(word in q_clean for word in ["compare", "more", "higher", "greater", "winner"]):
+                ans = (
+                    "## Followers\n"
+                    f"- Video A: {follower_a_str}\n"
+                    f"- Video B: {follower_b_str}\n"
+                )
+            elif "video a" in q_clean or "creator a" in q_clean:
+                ans = f"Video A has {follower_a_str} followers."
+            elif "video b" in q_clean or "creator b" in q_clean:
+                ans = f"Video B has {follower_b_str} followers."
+            else:
+                ans = (
+                    "## Followers\n"
+                    f"- Video A: {follower_a_str}\n"
+                    f"- Video B: {follower_b_str}\n"
+                )
+
             full_response = ans
             import re
             for part in re.split(r'(\s+)', ans):
                 if part:
                     async for ev in yield_event("token", {"content": part}):
                         yield ev
-            
+
             citations = [
                 _build_static_metadata_citation("A", meta_a, "A"),
                 _build_static_metadata_citation("B", meta_b, "B"),

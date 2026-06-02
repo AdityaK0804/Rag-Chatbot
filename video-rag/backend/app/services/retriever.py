@@ -61,6 +61,7 @@ def get_video_metadata(url_or_id: str) -> dict:
                 "url": meta.get("url"),
                 "platform": meta.get("platform"),
                 "creator": meta.get("creator") or "",
+                "follower_count": to_int(meta.get("follower_count")) or 0,
                 "title": meta.get("title") or "",
                 "views": to_int(meta.get("views")),
                 "likes": to_int(meta.get("likes")) or 0,
