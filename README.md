@@ -79,7 +79,7 @@ Gemini provides a strong balance between:
 - Cost
 Since the chatbot mainly performs retrieval-based question answering rather than extremely complex reasoning, Gemini Flash offered good performance without increasing operating costs.
 
-**Handling Missing Data**
+**Handling Missing Data?**
 
 One challenge i came up with was that the transcript and metadata for the videos from yt/insta were often incomplete.
 Ex:
